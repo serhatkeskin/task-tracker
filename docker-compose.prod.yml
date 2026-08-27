@@ -1,0 +1,78 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: tasktracker-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-tasktracker}
+      POSTGRES_USER: ${POSTGRES_USER:-tasktracker}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tasktracker}
+    volumes:
+      - tasktracker_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-tasktracker}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - oci-net
+
+  redis:
+    image: redis:7-alpine
+    container_name: tasktracker-redis
+    restart: unless-stopped
+    volumes:
+      - tasktracker_redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - oci-net
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: tasktracker-backend
+    restart: unless-stopped
+    environment:
+      POSTGRES_HOST: tasktracker-db
+      REDIS_URL: redis://tasktracker-redis:6379/0
+      DJANGO_DEBUG: "false"
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-tasktracker-prod-secret-key-change-me}
+      DJANGO_ALLOWED_HOSTS: "spark.serhatkeskin.com,localhost,127.0.0.1,tasktracker-backend"
+      CORS_ALLOWED_ORIGINS: "https://spark.serhatkeskin.com,http://spark.serhatkeskin.com"
+      CSRF_TRUSTED_ORIGINS: "https://spark.serhatkeskin.com,http://spark.serhatkeskin.com"
+    env_file:
+      - .env
+    volumes:
+      - ./backend:/app
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - oci-net
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+    container_name: tasktracker-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    networks:
+      - oci-net
+
+volumes:
+  tasktracker_pgdata:
+  tasktracker_redisdata:
+
+networks:
+  oci-net:
+    name: oci-net
+    external: true
